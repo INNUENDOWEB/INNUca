@@ -30,6 +30,11 @@ def spades(spades_folder, threads, fastq_files, notUseCareful, maxMemory, minCov
 def define_kmers(kmers, maximumReadsLength):
 	kmers_use = []
 	if maximumReadsLength is not None:
+		if kmers is None:
+			if maximumReadsLength >= 175:
+				kmers = [55, 77, 99, 113, 127]
+			else:
+				kmers = [21, 33, 55, 67, 77]
 		for kmer in kmers:
 			if kmer <= maximumReadsLength:
 				kmers_use.append(kmer)
@@ -51,6 +56,8 @@ def define_memory(maxMemory, threads, available_memory_GB):
 	GB_per_thread = 2048 / 1024.0
 
 	minimum_required_memory_GB = GB_per_thread * threads
+	if minimum_required_memory_GB < 4:
+		minimum_required_memory_GB = 4
 
 	if available_memory_GB == 0:
 		print 'WARNING: it was not possible to determine the free available memory!'

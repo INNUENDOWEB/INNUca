@@ -79,11 +79,11 @@ def parseArguments(version):
 	spades_options.add_argument('--spadesMinKmerCovContigs', type=int, metavar='N', help='Minimum contigs K-mer coverage. After assembly only keep contigs with reported k-mer coverage equal or above this value', required=False, default=2)
 
 	spades_kmers_options = parser.add_mutually_exclusive_group()
-	spades_kmers_options.add_argument('--spadesKmers', nargs='+', type=int, metavar='55 77', help='Manually sets SPAdes k-mers lengths (all values must be odd, lower than 128)', required=False, default=[55, 77, 99, 113, 127])
+	spades_kmers_options.add_argument('--spadesKmers', nargs='+', type=int, metavar='55 77', help='Manually sets SPAdes k-mers lengths (all values must be odd, lower than 128) (default values: reads length >= 175 [55, 77, 99, 113, 127]; reads length < 175 [21, 33, 55, 67, 77])', required=False)
 	spades_kmers_options.add_argument('--spadesDefaultKmers', action='store_true', help='Tells INNUca to use SPAdes default k-mers')
 
 	assembly_mapping_options = parser.add_argument_group('Assembly Mapping options')
-	assembly_mapping_options.add_argument('--assemblyMinCoverageContigs', type=int, metavar='N', help='Minimum contigs average coverage. After mapping reads back to the contigs, only keep contigs with at least this average coverage (default: 1/3 of the assembly mean coverage or 10x when mean coverage is lower than 30x)', required=False)
+	assembly_mapping_options.add_argument('--assemblyMinCoverageContigs', type=int, metavar='N', help='Minimum contigs average coverage. After mapping reads back to the contigs, only keep contigs with at least this average coverage (default: 1/3 of the assembly mean coverage or 10x)', required=False)
 
 	assembly_options = parser.add_argument_group('Assembly options')
 	assembly_options.add_argument('--saveExcludedContigs', action='store_true', help='Tells INNUca.py to save excluded contigs')
@@ -99,9 +99,10 @@ def parseArguments(version):
 	if args.skipTrueCoverage and args.trueConfigFile:
 		parser.error('Cannot use --skipTrueCoverage option with --trueConfigFile')
 
-	for number in args.spadesKmers:
-		if number % 2 == 0 or number >= 128:
-			parser.error('All k-mers values must be odd integers, lower than 128')
+	if args.spadesKmers is not None:
+		for number in args.spadesKmers:
+			if number % 2 == 0 or number >= 128:
+				parser.error('All k-mers values must be odd integers, lower than 128')
 
 	if len(args.speciesExpected.split(' ')) != 2:
 		parser.error('Mal-formatted species name. Should be something like "Streptococcus agalactiae"')
@@ -178,10 +179,9 @@ def kill_subprocess_Popen(subprocess_Popen, command):
 
 def runCommandPopenCommunicate(command, shell_True, timeout_sec_None, print_comand_True):
 	run_successfully = False
-	if isinstance(command, basestring):
-		command = shlex.split(command)
-	else:
-		command = shlex.split(' '.join(command))
+	if not isinstance(command, basestring):
+		command = ' '.join(command)
+	command = shlex.split(command)
 
 	if print_comand_True:
 		print 'Running: ' + ' '.join(command)
@@ -461,10 +461,10 @@ def scriptVersionGit(version, directory, script_path):
 	try:
 		os.chdir(os.path.dirname(script_path))
 		command = ['git', 'log', '-1', '--date=local', '--pretty=format:"%h (%H) - Commit by %cn, %cd) : %s"']
-		run_successfully, stdout, stderr = runCommandPopenCommunicate(command, False, None, False)
+		run_successfully, stdout, stderr = runCommandPopenCommunicate(command, False, 15, False)
 		print stdout
 		command = ['git', 'remote', 'show', 'origin']
-		run_successfully, stdout, stderr = runCommandPopenCommunicate(command, False, None, False)
+		run_successfully, stdout, stderr = runCommandPopenCommunicate(command, False, 15, False)
 		print stdout
 		os.chdir(directory)
 	except:
@@ -505,12 +505,14 @@ def sampleReportLine(run_report):
 	for step in steps:
 		run_successfully = str(run_report[step][0])
 		pass_qc = 'FAIL'
-		if run_report[step][1]:
+		if run_report[step][1] is True:
 			pass_qc = 'PASS'
 		elif run_report[step][1] is None:
 			pass_qc = run_report[step][3]['sample']
 
 		if step in ('first_FastQC', 'second_FastQC') and pass_qc == 'PASS' and len(run_report[step][4]) > 0:
+			pass_qc = 'WARNING'
+		elif step == 'SPAdes' and pass_qc == 'FAIL' and run_report['Assembly_Mapping'][1] is True:
 			pass_qc = 'WARNING'
 
 		if step in ('FastQ_Integrity', 'Pilon'):
@@ -541,11 +543,21 @@ def start_sample_report_file(samples_report_path):
 
 
 def write_sample_report(samples_report_path, sample, run_successfully, pass_qc, runningTime, fileSize, run_report):
-	line = [sample, run_successfully, 'PASS' if pass_qc else 'FAIL', runningTime, fileSize]
+	line = [sample, run_successfully, '', runningTime, fileSize]
+
+	line[2] = 'PASS' if pass_qc else 'FAIL'
+	warning = 0
+	if line[2] == 'PASS':
+		if run_report['SPAdes'][1] is False:
+			line[2] = 'WARNING'
+			warning = 1
+
 	line.extend(sampleReportLine(run_report))
 	with open(samples_report_path, 'at') as report:
 		out = csv.writer(report, delimiter='\t')
 		out.writerow(line)
+
+	return warning
 
 
 def timer(function, name):
